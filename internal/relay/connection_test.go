@@ -2,8 +2,6 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Alexander Morozov
- *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -27,43 +25,27 @@
 package relay
 
 import (
-	"encoding/binary"
-	"fmt"
-	"net"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type AddrType uint8
+func TestNewOutgoingConn(t *testing.T) {
+	t.Parallel()
 
-const (
-	AddrTypeIpv4 AddrType = 0x0
-	AddrTypeIpv6          = 0x1
-)
+	t.Run("Success on connect", func(t *testing.T) {
+		conn, err := newOutgoingConn("google.com:80")
 
-func GetTcpAddrType(address net.Addr) AddrType {
-	ip, _ := address.(*net.TCPAddr)
-	if ip.IP.To4() != nil {
-		return AddrTypeIpv4
-	} else {
-		return AddrTypeIpv6
-	}
-}
+		assert.NoError(t, err)
+		assert.NotNil(t, conn)
 
-func BytesIp4ToString(ip []byte) string {
-	return fmt.Sprintf("%v.%v.%v.%v", int(ip[0]), int(ip[1]), int(ip[2]), int(ip[3]))
-}
+		conn.Close()
+	})
 
-func BytesIp6ToString(ip []byte) string {
-	return fmt.Sprintf("%X:%X:%X:%X:%X:%X:%X:%X",
-		binary.BigEndian.Uint16(ip[0:2]),
-		binary.BigEndian.Uint16(ip[2:4]),
-		binary.BigEndian.Uint16(ip[4:6]),
-		binary.BigEndian.Uint16(ip[6:8]),
-		binary.BigEndian.Uint16(ip[8:10]),
-		binary.BigEndian.Uint16(ip[10:12]),
-		binary.BigEndian.Uint16(ip[12:14]),
-		binary.BigEndian.Uint16(ip[14:16]))
-}
+	t.Run("Fail to connect", func(t *testing.T) {
+		conn, err := newOutgoingConn("127.0.0.1:50000")
 
-func AddressIpToBytes(ip string) []byte {
-	return net.ParseIP(ip).To4()
+		assert.Error(t, err)
+		assert.Nil(t, conn)
+	})
 }
