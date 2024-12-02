@@ -24,11 +24,27 @@
 package relay
 
 import (
+	"context"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+type mockConfig struct{}
+
+func TestRelay(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go Run(ctx, mockConfig{})
+
+	time.Sleep(time.Second)
+
+	cancel()
+}
 
 func TestUtils(t *testing.T) {
 	t.Parallel()
@@ -38,4 +54,14 @@ func TestUtils(t *testing.T) {
 
 		assert.EqualValues(t, "127.0.0.1:3030", addr)
 	})
+}
+
+func (mockConfig) Local() netip.Addr {
+	return netip.MustParseAddr("127.0.0.1")
+}
+func (mockConfig) Remote() netip.Addr {
+	return netip.MustParseAddr("127.0.0.1")
+}
+func (mockConfig) Ports() []uint16 {
+	return []uint16{30000}
 }

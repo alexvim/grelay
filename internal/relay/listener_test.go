@@ -26,6 +26,7 @@ package relay
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,7 +40,8 @@ func TestListener(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		go func() {
-			_ = runListener(ctx, "127.0.0.1:50500", func(_ context.Context, _ net.Conn) {
+			_ = listenConn(ctx, "127.0.0.1:50500", func(_ context.Context, conn net.Conn) {
+				defer conn.Close()
 				cancel()
 			})
 		}()
@@ -53,8 +55,55 @@ func TestListener(t *testing.T) {
 		conn.Close()
 	})
 
+	t.Run("Many_conn_up_and_close", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		wg, barier, connCount := &sync.WaitGroup{}, &sync.WaitGroup{}, &sync.WaitGroup{}
+
+		barier.Add(1)
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			connCount.Add(1)
+
+			go func() {
+				defer wg.Done()
+				barier.Wait()
+
+				conn, err := net.Dial("tcp", "127.0.0.1:51110")
+				assert.NoError(t, err)
+				assert.NotNil(t, conn)
+
+				conn.Read(make([]byte, 10))
+				conn.Close()
+			}()
+		}
+
+		go func() {
+			err := listenConn(ctx, "127.0.0.1:51110", func(lctx context.Context, conn net.Conn) {
+				connCount.Done()
+				<-lctx.Done()
+				conn.Close()
+			})
+
+			assert.NoError(t, err)
+		}()
+
+		time.Sleep(time.Second)
+
+		barier.Done()
+
+		connCount.Wait()
+
+		cancel()
+
+		wg.Wait()
+	})
+
 	t.Run("Fail to connect", func(t *testing.T) {
-		err := runListener(context.Background(), "428.0.0.1:1012", func(_ context.Context, _ net.Conn) {})
+		t.Parallel()
+
+		err := listenConn(context.Background(), "428.0.0.1:1012", func(_ context.Context, _ net.Conn) {})
 
 		assert.Error(t, err)
 	})
