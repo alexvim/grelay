@@ -53,6 +53,8 @@ func main() {
 }
 
 func monitorSyscall(doClose func()) {
+	defer doClose()
+
 	done := make(chan os.Signal, 1)
 
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
@@ -60,6 +62,4 @@ func monitorSyscall(doClose func()) {
 	<-done
 
 	signal.Reset()
-
-	doClose()
 }

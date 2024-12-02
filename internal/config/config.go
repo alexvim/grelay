@@ -65,7 +65,10 @@ func NewConfigFromCmdLineArgs(args []string) (Config, error) {
 	flags.StringVar(&remoteArg, "r", "", remoteParamDesc)
 	flags.StringVar(&portsArg, "p", "", portParamDesc)
 
-	flags.Parse(args)
+	if err := flags.Parse(args); err != nil {
+		log.Printf("filaed to parse parameters err=%s", err)
+		return Config{}, ErrInvalidArgs
+	}
 
 	return makeConfig(localArg, remoteArg, portsArg)
 }

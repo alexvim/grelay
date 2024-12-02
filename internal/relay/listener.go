@@ -28,44 +28,65 @@ import (
 	"errors"
 	"log"
 	"net"
+	"sync"
 )
 
-// Handle new connection on go routine
+// Handle new connection on goroutines
 type acceptorFunc func(ctx context.Context, conn net.Conn)
 
 // Run listener bound to addr and call connHandler on new incoming connection
-func runListener(ctx context.Context, addr string, connHandler acceptorFunc) error {
-	log.Printf("relay: start listening on addr=%s\n", addr)
+func listenConn(ctx context.Context, addr string, connHandler acceptorFunc) error {
+	log.Printf("listener: start listening on addr=%s\n", addr)
 
 	lc := &net.ListenConfig{}
 
 	listener, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
-		log.Printf("relay: failed to listen addr=%s, err=%s\n", addr, err)
+		log.Printf("listener: failed to listen addr=%s, err=%s\n", addr, err)
 		return errors.Join(ErrListenAddr, err)
 	}
 
-	go func() {
-		<-ctx.Done()
+	defer listener.Close()
 
-		log.Printf("relay: close relay listener addr=%s\n", addr)
+	wg := &sync.WaitGroup{}
+
+	lctx, cancel := context.WithCancel(ctx)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		<-lctx.Done()
+
+		log.Printf("listener: close relay listener addr=%s\n", addr)
 
 		if err := listener.Close(); err != nil {
-			log.Println("relay: failed to close listener")
+			log.Println("listener: failed to close listener")
 		}
 	}()
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("relay: failed to accept for addr=%s err=%v\n", addr, err)
+			log.Printf("listener: failed to accept for addr=%s err=%v\n", addr, err)
 			break
 		}
 
-		log.Printf("relay: accept connection on addr=%s\n", addr)
+		log.Printf("listener: accept connection on addr=%s\n", addr)
 
-		go connHandler(ctx, conn)
+		wg.Add(1)
+		go func() {
+			connHandler(ctx, conn)
+			wg.Done()
+		}()
 	}
+
+	// cancel if not and wait for all goroutines completes
+	cancel()
+
+	wg.Wait()
+
+	log.Printf("listener: stop listening on addr=%s\n", addr)
 
 	return nil
 }
