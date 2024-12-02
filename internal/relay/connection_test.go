@@ -33,6 +33,8 @@ func TestNewOutgoingConn(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Success on connect", func(t *testing.T) {
+		t.Parallel()
+
 		conn, err := newOutgoingConn("google.com:80")
 
 		assert.NoError(t, err)
@@ -42,7 +44,9 @@ func TestNewOutgoingConn(t *testing.T) {
 	})
 
 	t.Run("Fail to connect", func(t *testing.T) {
-		conn, err := newOutgoingConn("127.0.0.1:50000")
+		t.Parallel()
+
+		conn, err := newOutgoingConn("127.0.0.1:40100")
 
 		assert.Error(t, err)
 		assert.Nil(t, conn)

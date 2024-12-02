@@ -24,15 +24,19 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math/rand"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+const mockRemoteAddr = "mock-remote-addr"
 
 type connMock struct {
 	readCnt  int
@@ -60,7 +64,7 @@ func TestReleay(t *testing.T) {
 
 		rel := newPacketRelay()
 
-		rel.realyPackets(in, out)
+		rel.realyPackets(in, "in-remote-addr", out, "out-remote-addr")
 
 		assert.LessOrEqual(t, 1, in.readCnt)
 		assert.LessOrEqual(t, 1, in.writeCnt)
@@ -87,7 +91,7 @@ func TestReleay(t *testing.T) {
 
 		rch <- make([]byte, 1)
 
-		go rel.relay(cm, rch, wch)
+		go rel.relay(cm, "remote-addr", rch, wch)
 
 		<-wch
 
@@ -114,7 +118,7 @@ func TestReleay(t *testing.T) {
 
 		rel := newPacketRelay()
 
-		go rel.realyPackets(in, out)
+		go rel.realyPackets(in, "in-remote-addr", out, "out-remote-addr")
 
 		rnd := rand.NewSource(time.Now().Unix())
 		ms := rnd.Int63() % 3000
@@ -129,28 +133,110 @@ func TestReleay(t *testing.T) {
 		assert.LessOrEqual(t, 1, out.readCnt)
 		assert.LessOrEqual(t, 1, out.writeCnt)
 	})
+
+	t.Run("Success_run_relay", func(t *testing.T) {
+		const localAddress = "127.0.0.1:50110"
+		const remoteAddress = "127.0.0.1:50011"
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		rel := newPacketRelay()
+
+		wg := &sync.WaitGroup{}
+
+		wg.Add(1)
+		go func() {
+			rel.runRelay(ctx, localAddress, remoteAddress)
+			wg.Done()
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			listen, err := net.Listen("tcp", remoteAddress)
+			if err != nil {
+				assert.FailNow(t, "failed to open listener")
+			}
+
+			conn, err := listen.Accept()
+			if err != nil {
+				assert.FailNow(t, "failed to accept conn")
+			}
+
+			conn.Close()
+		}()
+
+		time.Sleep(time.Second)
+
+		conn, err := net.Dial("tcp", localAddress)
+		if err != nil {
+			assert.Fail(t, "error on test dial")
+
+			defer cancel()
+
+			return
+		}
+
+		defer conn.Close()
+
+		cancel()
+
+		wg.Wait()
+	})
+
+	t.Run("Failed_to_conn_on_run_relay", func(t *testing.T) {
+		const localAddress = "127.0.0.1:50112"
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		rel := newPacketRelay()
+
+		wg := &sync.WaitGroup{}
+
+		wg.Add(1)
+		go func() {
+			rel.runRelay(ctx, localAddress, "127.0.0.1:50012")
+			wg.Done()
+		}()
+
+		time.Sleep(time.Second)
+
+		conn, err := net.Dial("tcp", localAddress)
+		if err != nil {
+			defer cancel()
+
+			assert.Fail(t, "error on test dial")
+			return
+		}
+
+		defer conn.Close()
+
+		cancel()
+
+		wg.Wait()
+	})
 }
 
 func TestChanToConnReleay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Success ch2conn crelay", func(t *testing.T) {
+	t.Run("Success_ch2conn_relay", func(t *testing.T) {
 		t.Parallel()
 
-		ch := make(chan []byte, 1)
+		ch, cm := make(chan []byte, 1), &connMock{}
 
-		go chanToConnRelay(ch, &connMock{})
+		go chanToConnRelay(cm, ch, mockRemoteAddr)
 
 		close(ch)
 	})
 
-	t.Run("Success ch2conn relay", func(t *testing.T) {
+	t.Run("Success_ch2conn_write_relay", func(t *testing.T) {
 		t.Parallel()
 
-		ch := make(chan []byte)
-		cm := &connMock{}
+		ch, cm := make(chan []byte), &connMock{}
 
-		go chanToConnRelay(ch, cm)
+		go chanToConnRelay(cm, ch, mockRemoteAddr)
 
 		ch <- make([]byte, 10)
 
@@ -159,17 +245,12 @@ func TestChanToConnReleay(t *testing.T) {
 		assert.EqualValues(t, 1, cm.writeCnt)
 	})
 
-	t.Run("Success ch2conn write failed", func(t *testing.T) {
+	t.Run("Success_ch2conn_write_failed", func(t *testing.T) {
 		t.Parallel()
 
-		ch := make(chan []byte)
-		cm := &connMock{
-			write: func(_ int) (n int, err error) {
-				return 0, errors.New("error")
-			},
-		}
+		ch, cm := make(chan []byte), &connMock{write: func(_ int) (n int, err error) { return 0, errors.New("error") }}
 
-		go chanToConnRelay(ch, cm)
+		go chanToConnRelay(cm, ch, mockRemoteAddr)
 
 		ch <- make([]byte, 10)
 
@@ -182,7 +263,7 @@ func TestChanToConnReleay(t *testing.T) {
 func TestConnToChanReleay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Success read and close", func(t *testing.T) {
+	t.Run("Success_read_and_close", func(t *testing.T) {
 		t.Parallel()
 
 		ch := make(chan []byte, 1)
@@ -195,7 +276,7 @@ func TestConnToChanReleay(t *testing.T) {
 			},
 		}
 
-		connToChanRelay(cm, ch)
+		connToChanRelay(cm, ch, mockRemoteAddr)
 
 		data, ok := <-ch
 
@@ -205,17 +286,12 @@ func TestConnToChanReleay(t *testing.T) {
 		assert.EqualValues(t, 2, cm.readCnt)
 	})
 
-	t.Run("Fail with not EOF", func(t *testing.T) {
+	t.Run("Fail_with_not_EOF", func(t *testing.T) {
 		t.Parallel()
 
-		ch := make(chan []byte, 1)
-		cm := &connMock{
-			read: func(_ int) (n int, err error) {
-				return 0, errors.New("error")
-			},
-		}
+		ch, cm := make(chan []byte, 1), &connMock{read: func(_ int) (n int, err error) { return 0, errors.New("error") }}
 
-		connToChanRelay(cm, ch)
+		connToChanRelay(cm, ch, mockRemoteAddr)
 
 		assert.EqualValues(t, 1, cm.readCnt)
 	})
@@ -224,12 +300,10 @@ func TestConnToChanReleay(t *testing.T) {
 func TestMakeReleay(t *testing.T) {
 	t.Parallel()
 
-	prelay := newPacketRelay()
-
-	assert.NotNil(t, prelay.wg)
+	assert.NotNil(t, newPacketRelay().wg)
 }
 
-// Mockup net.Conn
+// Mockup io.ReaderWriteCloser
 func (conn *connMock) Read(b []byte) (n int, err error) {
 	if conn.closed {
 		return 0, io.EOF
@@ -242,6 +316,7 @@ func (conn *connMock) Read(b []byte) (n int, err error) {
 
 	return 5, nil
 }
+
 func (conn *connMock) Write(b []byte) (n int, err error) {
 	if conn.closed {
 		return 0, io.EOF
@@ -254,22 +329,8 @@ func (conn *connMock) Write(b []byte) (n int, err error) {
 
 	return 5, nil
 }
+
 func (conn *connMock) Close() error {
 	conn.closed = true
-	return nil
-}
-func (connMock) LocalAddr() net.Addr {
-	return nil
-}
-func (connMock) RemoteAddr() net.Addr {
-	return nil
-}
-func (connMock) SetDeadline(t time.Time) error {
-	return nil
-}
-func (connMock) SetReadDeadline(t time.Time) error {
-	return nil
-}
-func (connMock) SetWriteDeadline(t time.Time) error {
 	return nil
 }

@@ -33,52 +33,60 @@ func TestMakeConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		lip   string
-		rip   string
-		ports string
-		ok    bool
+		lip    string
+		rip    string
+		ports  string
+		pports []uint16
+		ok     bool
 	}{
 		"correct": {
-			lip:   "129.23.22.123",
-			rip:   "129.23.22.123",
-			ports: "443,23, 43, 432, 23423",
-			ok:    true,
+			lip:    "129.23.22.123",
+			rip:    "129.23.22.123",
+			ports:  "443,23, 43, 432, 23423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     true,
 		},
 		"lip with port": {
-			lip:   "129.23.22.123:3030",
-			rip:   "129.23.22.123",
-			ports: "443,23, 43, 432, 23423",
-			ok:    false,
+			lip:    "129.23.22.123:3030",
+			rip:    "129.23.22.123",
+			ports:  "443,23, 43, 432, 23423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     false,
 		},
 		"rip with port": {
-			lip:   "129.23.22.123",
-			rip:   "129.23.22.123:3030",
-			ports: "443,23, 43, 432, 23423",
-			ok:    false,
+			lip:    "129.23.22.123",
+			rip:    "129.23.22.123:3030",
+			ports:  "443,23, 43, 432, 23423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     false,
 		},
 		"lip failed": {
-			lip:   "129.23.22.323",
-			rip:   "129.23.22.123",
-			ports: "443,23, 43, 432, 23423",
-			ok:    false,
+			lip:    "129.23.22.323",
+			rip:    "129.23.22.123",
+			ports:  "443,23, 43, 432, 23423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     false,
 		},
 		"rip failed": {
-			lip:   "129.23.22.123",
-			rip:   "129.23.22.323",
-			ports: "443,23, 43, 432, 23423",
-			ok:    false,
+			lip:    "129.23.22.123",
+			rip:    "129.23.22.323",
+			ports:  "443,23, 43, 432, 23423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     false,
 		},
 		"port format failed": {
-			lip:   "129.23.22.123",
-			rip:   "129.23.22.123",
-			ports: "443,23, 43, 432, s23423",
-			ok:    false,
+			lip:    "129.23.22.123",
+			rip:    "129.23.22.123",
+			ports:  "443,23, 43, 432, s23423",
+			pports: nil,
+			ok:     false,
 		},
 		"port format failed by out of range": {
-			lip:   "129.23.22.123",
-			rip:   "129.23.22.123",
-			ports: "443,23, 43, 432, 232423",
-			ok:    false,
+			lip:    "129.23.22.123",
+			rip:    "129.23.22.123",
+			ports:  "443,23, 43, 432, 232423",
+			pports: []uint16{443, 23, 43, 432, 23423},
+			ok:     false,
 		},
 	}
 
@@ -86,9 +94,17 @@ func TestMakeConfig(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := makeConfig(test.lip, test.rip, test.ports)
+			cfg, err := makeConfig(test.lip, test.rip, test.ports)
 
 			assert.EqualValues(t, test.ok, (err == nil), "input", test.lip, test.rip, test.ports)
+
+			if err != nil {
+				return
+			}
+
+			assert.EqualValues(t, test.lip, cfg.Local().String())
+			assert.EqualValues(t, test.rip, cfg.Remote().String())
+			assert.EqualValues(t, test.pports, cfg.Ports())
 		})
 	}
 }
@@ -121,4 +137,16 @@ func TestNewConfig(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestPrint(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"-l", "129.23.22.123", "-r", "129.23.22.123", "-p", "443,23, 43, 432, 23423"}
+
+	cfg, err := NewConfigFromCmdLineArgs(args)
+
+	assert.NoError(t, err)
+
+	assert.NotEmpty(t, cfg.String())
 }
